@@ -42,18 +42,19 @@ module ActiveRecord
 
         begin
           yield
-        rescue PG::ConnectionBad, PG::UnableToSend, ActiveRecord::StatementInvalid => ex
+        rescue PG::Error, PG::ConnectionBad, PG::UnableToSend, ActiveRecord::StatementInvalid => ex
+          raise unless ex.message =~ /invalid encoding name/ if ex.is_a? PG::Error
           raise if open_transactions != 0
           raise if retry_count >= PG_QUERY_RETRY
-          raise if ex.is_a?(ActiveRecord::StatementInvalid) unless (
-            ex.original_exception.is_a?(PG::ConnectionBad) ||
-            ex.original_exception.is_a?(PG::UnableToSend)
-          )
+          raise unless (
+          ex.original_exception.is_a?(PG::ConnectionBad) ||
+              ex.original_exception.is_a?(PG::UnableToSend)
+          ) if ex.is_a?(ActiveRecord::StatementInvalid) && ex.respond_to?(:original_exception)
 
           sleep PG_SLEEP_RETRY
           retry_count += 1
           $log.warn "PostgreSQL retry ##{retry_count} '#{defined?(sql) ? sql : ''}' because #{ex}"
-          reconnect!
+          old_reconnect! rescue nil
           retry
         end
 
